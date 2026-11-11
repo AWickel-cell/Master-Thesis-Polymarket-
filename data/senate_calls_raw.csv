@@ -1,0 +1,36 @@
+state,source,status,party,time_et,called
+alaska,CNN,Too early to call,NA,NA,FALSE
+maine,CNN,Called: Troy Jackson (D)12:17 AM EST · first,D,12:17 AM EST,TRUE
+new-hampshire,CNN,"Called: Chris Pappas (D)8:24 PM EST · 8th, +25 min",D,8:24 PM EST,TRUE
+idaho,CNN,"Called: Jim Risch (R)1:39 AM EST · 8th, +1h 47m",R,1:39 AM EST,TRUE
+montana,CNN,"Called: Kurt Alme (R)2:49 AM EST · 4th, +1h 36m",R,2:49 AM EST,TRUE
+minnesota,CNN,"Called: Peggy Flanagan (D)12:08 AM EST · 7th, +6 min",D,12:08 AM EST,TRUE
+illinois,CNN,Called: Juliana Stratton (D)8:00 PM EST · first,D,8:00 PM EST,TRUE
+michigan,CNN,"Called: Abdul El-Sayed (D)2:27 AM EST · 3rd, +1h 13m",D,2:27 AM EST,TRUE
+rhode-island,CNN,Called: Jack Reed (D)8:00 PM EST · first,D,8:00 PM EST,TRUE
+massachusetts,CNN,Called: Ed Markey (D)8:00 PM EST · first,D,8:00 PM EST,TRUE
+oregon,CNN,Called: Jeff Merkley (D)11:00 PM EST · first,D,11:00 PM EST,TRUE
+wyoming,CNN,Called: Harriet Hageman (R)9:00 PM EST · first,R,9:00 PM EST,TRUE
+south-dakota,CNN,"Called: Mike Rounds (R)12:19 AM EST · 8th, +2h 17m",R,12:19 AM EST,TRUE
+iowa,CNN,"Called: Josh Turek (D)11:35 PM EST · 5th, +19 min",D,11:35 PM EST,TRUE
+ohio-special,CNN,Called: Sherrod Brown (D)10:59 PM EST · first,D,10:59 PM EST,TRUE
+new-jersey,CNN,Called: Cory Booker (D)8:00 PM EST · first,D,8:00 PM EST,TRUE
+colorado,CNN,Called: John Hickenlooper (D)9:00 PM EST · first,D,9:00 PM EST,TRUE
+nebraska,CNN,"Called: Pete Ricketts (R)3:38 AM EST · 7th, +2h 5m",R,3:38 AM EST,TRUE
+kentucky,CNN,"Called: Andy Barr (R)9:22 PM EST · 8th, +57 min",R,9:22 PM EST,TRUE
+west-virginia,CNN,"Called: Shelley Moore Capito (R)9:00 PM EST · 8th, +1h 30m",R,9:00 PM EST,TRUE
+virginia,CNN,Called: Mark Warner (D)7:00 PM EST · first,D,7:00 PM EST,TRUE
+delaware,CNN,Called: Chris Coons (D)8:00 PM EST · first,D,8:00 PM EST,TRUE
+new-mexico,CNN,Called: Ben Ray Luján (D)9:00 PM EST · first,D,9:00 PM EST,TRUE
+kansas,CNN,"Called: Adam Hamilton (D)11:15 PM EST · 2nd, +28 min",D,11:15 PM EST,TRUE
+arkansas,CNN,"Called: Tom Cotton (R)10:35 PM EST · 4th, +36 min",R,10:35 PM EST,TRUE
+tennessee,CNN,"Called: Bill Hagerty (R)11:20 PM EST · 5th, +1h 32m",R,11:20 PM EST,TRUE
+north-carolina,CNN,"Called: Roy Cooper (D)8:28 PM EST · 7th, +5 min",D,8:28 PM EST,TRUE
+south-carolina,CNN,"Called: Annie Andrews (D)10:02 PM EST · 3rd, +7 min",D,10:02 PM EST,TRUE
+oklahoma,CNN,"Called: Kevin Hern (R)9:22 PM EST · 3rd, +1h 23m",R,9:22 PM EST,TRUE
+louisiana,CNN,"Called: Julia Letlow (R)12:33 AM EST · 6th, +2 min",R,12:33 AM EST,TRUE
+mississippi,CNN,Too close to call,NA,NA,FALSE
+alabama,CNN,"Called: Barry Moore (R)11:20 PM EST · 7th, +1h 14m",R,11:20 PM EST,TRUE
+georgia,CNN,"Called: Jon Ossoff (D)7:52 PM EST · 3rd, +34 min",D,7:52 PM EST,TRUE
+texas,CNN,"Called: James Talarico (D)10:59 PM EST · 3rd, +46 min",D,10:59 PM EST,TRUE
+florida-special,CNN,"Called: Ashley Moody (R)8:34 PM EST · 4th, +34 min",R,8:34 PM EST,TRUE
