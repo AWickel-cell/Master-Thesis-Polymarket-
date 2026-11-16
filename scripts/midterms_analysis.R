@@ -31,7 +31,8 @@ events <- read_csv(
   "data/senate_events.csv",
   show_col_types = FALSE
 ) |>
-  mutate(time_utc = as_datetime(time_utc, tz = "UTC"))
+  mutate(time_utc = as_datetime(time_utc, tz = "UTC")) |>
+  filter(time_utc >= start_time, time_utc < end_time)
 
 # Aggregate volume and CNN calls
 prepare_data <- function(minutes) {
@@ -48,7 +49,7 @@ prepare_data <- function(minutes) {
     complete(
       period = seq(
         start_time,
-        end_time - minutes(minutes),
+        end_time - lubridate::minutes(minutes),
         by = paste(minutes, "min")
       ),
       fill = list(volume_usd = 0, n_trades = 0)
@@ -64,9 +65,33 @@ prepare_data <- function(minutes) {
     mutate(n_calls = replace_na(n_calls, 0L))
 }
 
+# Calculate 95% confidence intervals
+get_ci <- function(model) {
+  beta <- model$estimate[6]
+  hessian <- model$hessian
+  
+  if (is.null(hessian) ||
+      any(!is.finite(hessian)) ||
+      min(eigen(hessian, symmetric = TRUE,
+                only.values = TRUE)$values) <= 0) {
+    warning("Hessian is not positive definite.")
+    se <- NA_real_
+  } else {
+    se <- sqrt(solve(hessian)[6, 6])
+  }
+  
+  data.frame(
+    estimate = beta,
+    se = se,
+    lower = beta - qnorm(0.975) * se,
+    upper = beta + qnorm(0.975) * se
+  )
+}
+
 # Fit SSMs
 fit_midterms <- function(model_data, minutes) {
   y <- model_data$volume_usd
+  
   x_count <- as.matrix(model_data["n_calls"])
   x_dummy <- as.matrix(data.frame(
     call_dummy = as.integer(model_data$n_calls > 0)
@@ -90,13 +115,15 @@ fit_midterms <- function(model_data, minutes) {
   mod_count <- nlm(
     nll_ssm_cov,
     c(mod_ssm$estimate, 0),
-    y = y, x = x_count, grid = grid
+    y = y, x = x_count, grid = grid,
+    hessian = TRUE
   )
   
   mod_dummy <- nlm(
     nll_ssm_cov,
     c(mod_ssm$estimate, 0),
-    y = y, x = x_dummy, grid = grid
+    y = y, x = x_dummy, grid = grid,
+    hessian = TRUE
   )
   
   models <- list(
@@ -117,21 +144,34 @@ fit_midterms <- function(model_data, minutes) {
     row.names = NULL
   )
   
+  ci_count <- get_ci(mod_count)
+  ci_dummy <- get_ci(mod_dummy)
+  
+  confidence_intervals <- bind_rows(
+    mutate(ci_count, model = "CNN count"),
+    mutate(ci_dummy, model = "CNN dummy")
+  ) |>
+    mutate(resolution = paste0(minutes, "min")) |>
+    select(resolution, model, estimate, se, lower, upper)
+  
   cat("\nResolution:", minutes, "minutes\n")
   cat("Intervals:", length(y), "\n")
   cat("Trades:", sum(model_data$n_trades), "\n")
   cat("Zero share:", round(mean(y == 0), 4), "\n")
   cat("CNN calls:", sum(model_data$n_calls), "\n")
   cat("Intervals with calls:", sum(model_data$n_calls > 0), "\n")
-  cat("Count coefficient:", round(mod_count$estimate[6], 4), "\n")
-  cat("Dummy coefficient:", round(mod_dummy$estimate[6], 4), "\n")
   
+  cat("\nModel comparison:\n")
   print(comparison)
+  
+  cat("\nCNN coefficients and 95% confidence intervals:\n")
+  print(confidence_intervals)
   
   list(
     data = model_data,
     models = models,
-    comparison = comparison
+    comparison = comparison,
+    confidence_intervals = confidence_intervals
   )
 }
 
@@ -157,9 +197,32 @@ for (minutes_value in c(60, 15)) {
     fit_midterms(model_data, minutes_value)
 }
 
-comparison <- bind_rows(lapply(results, `[[`, "comparison"))
+comparison <- bind_rows(
+  lapply(results, `[[`, "comparison")
+)
 
-dir.create("results/midterms", recursive = TRUE, showWarnings = FALSE)
+confidence_intervals <- bind_rows(
+  lapply(results, `[[`, "confidence_intervals")
+)
 
-write_csv(comparison, "results/midterms/model_comparison.csv")
-saveRDS(results, "results/midterms/results.rds")
+dir.create(
+  "results/midterms",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+write_csv(
+  comparison,
+  "results/midterms/model_comparison.csv"
+)
+
+write_csv(
+  confidence_intervals,
+  "results/midterms/confidence_intervals.csv"
+)
+
+saveRDS(
+  results,
+  "results/midterms/results.rds"
+)
+
