@@ -1,0 +1,220 @@
+
+---
+title: "Intermediate Update"
+output:
+  pdf_document:
+    number_sections: true
+    fig_caption: true
+geometry: margin=2.5cm
+fontsize: 11pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  out.width = "95%"
+)
+
+library(dplyr)
+library(ggplot2)
+library(knitr)
+
+final <- readRDS("results/final_model/results.rds")
+comparison_results <- readRDS("results/model_comparison/results.rds")
+grid_results <- readRDS("results/grid_sensitivity/results.rds")
+```
+
+# Covariate Selection
+
+The initial model was extended by including covariates to account for systematic variation in trading volume.
+
+The following covariates were considered:
+
+- **Time of day:** Sine and cosine terms capture potential daily patterns in trading activity.
+- **Weekend:** A binary indicator distinguishes weekends from weekdays.
+- **Political events:** CNN election calls are investigated as potential explanatory variables for trading activity around the US midterm elections.
+- **Oil price changes:** Absolute daily Brent oil price changes are considered as an additional exploratory covariate.
+
+The final model currently includes time-of-day and weekend effects in both the positive-volume distribution and the zero-volume probability.
+
+Further covariate analyses are ongoing.
+
+*TODO: Add results and interpretation of covariate selection.*
+
+# Model Comparison
+
+Five models were compared to evaluate the contributions of latent dynamics, covariates, and state-dependent zero probabilities.
+
+The final model assumes a zero-adjusted lognormal observation distribution with a latent AR(1) process.
+
+For positive trading volume,
+
+$$
+\log(V_t)\mid V_t>0,s_t
+\sim
+\mathcal{N}
+\left(
+\mu+\boldsymbol{x}_t^\top\boldsymbol{\beta}+s_t,
+\sigma^2
+\right).
+$$
+
+The probability of zero trading volume is modeled as
+
+$$
+\operatorname{logit}(\pi_{0,t}(s_t))
+=
+\alpha_0+
+\boldsymbol{z}_t^\top\boldsymbol{\alpha}
++
+\gamma_0s_t.
+$$
+
+The latent process follows
+
+$$
+s_t=\phi s_{t-1}+\sigma_s\varepsilon_t,
+\qquad
+\varepsilon_t\sim\mathcal{N}(0,1).
+$$
+
+Both covariate vectors contain the sine and cosine terms for time of day and the weekend indicator.
+
+```{r model-comparison}
+comparison <- read.csv(
+  "results/model_comparison/comparison.csv"
+)
+
+knitr::kable(
+  comparison,
+  digits = 2,
+  caption = "Comparison of five model specifications."
+)
+```
+
+The introduction of a latent AR(1) process substantially improves model fit compared with the corresponding models without latent dynamics.
+
+Including time-of-day and weekend covariates provides an additional improvement.
+
+The largest improvement is obtained by allowing the zero-volume probability to depend on the latent state.
+
+The final model achieves the lowest AIC and BIC among the considered specifications.
+
+# Grid Sensitivity
+
+The numerical stability of the final model was assessed using three different discretization grids: 151 points on [-5, 5], 151 points on [-4, 4], and 201 points on [-5, 5].
+
+The resulting log-likelihoods and parameter estimates were nearly identical across all three configurations. The maximum difference in log-likelihood was below 0.001.
+
+In particular, the estimated persistence parameter $\phi$ and the latent innovation standard deviation $\sigma_s$ remained stable.
+
+These results suggest that the model estimates are robust to the considered grid specifications. The grid with 151 points on [-5, 5] was retained for subsequent analyses.
+
+# Estimated Latent State and Political Events
+
+The estimated latent state represents persistent changes in trading activity that are not explained by the observed covariates.
+
+The following figure shows the smoothed latent state together with selected political events.
+
+```{r latent-events, fig.cap="Estimated latent state with selected political events.", fig.width=12, fig.height=5}
+latent_plot <- "results/latent_state/latent_events_full.png"
+
+if (file.exists(latent_plot)) {
+  knitr::include_graphics(latent_plot)
+} else {
+  cat("Latent state plot will be added after estimation.")
+}
+```
+
+The latent state exhibits substantial variation over time, indicating persistent changes in trading activity.
+
+Selected political events are included to explore whether major developments coincide with changes in the estimated latent state.
+
+However, temporal coincidence alone does not establish a causal relationship.
+
+*TODO: Add interpretation of the most relevant movements in the updated latent state plot.*
+
+# Model Diagnostics
+
+Model diagnostics are based on randomized quantile residuals obtained from the final state-space model.
+
+The residual distribution and remaining temporal dependence are assessed using a histogram, a normal Q-Q plot, and the autocorrelation function.
+
+```{r diagnostics, fig.width=10, fig.height=4.5}
+diagnostic_plot <- "results/diagnostics/residual_diagnostics.png"
+
+if (file.exists(diagnostic_plot)) {
+  knitr::include_graphics(diagnostic_plot)
+} else {
+  cat("Residual diagnostic plots will be added after computation.")
+}
+```
+
+*TODO: Add interpretation of the residual distribution, Q-Q plot, and ACF after recomputing diagnostics for the final model.*
+
+# Bivariate Modeling of Yes and No Trading Volume
+
+The previous analyses considered total trading volume aggregated across both outcomes.
+
+As an extension, trading volume is analyzed separately for Yes and No trades.
+
+Three model specifications are considered:
+
+1. Separate state-space models for Yes and No trading volume.
+2. A joint model with a shared latent AR(1) process.
+3. A bivariate model with two correlated latent AR(1) processes.
+
+The models include time-of-day and weekend covariates and allow zero-volume probabilities to depend on the latent states.
+
+For the correlated model, the latent processes are specified as
+
+$$
+s_{Y,t}
+=
+\phi_Ys_{Y,t-1}
++
+\sigma_{s,Y}\varepsilon_{Y,t},
+$$
+
+$$
+s_{N,t}
+=
+\phi_Ns_{N,t-1}
++
+\sigma_{s,N}\varepsilon_{N,t},
+$$
+
+with
+
+$$
+\operatorname{Corr}
+(\varepsilon_{Y,t},\varepsilon_{N,t})
+=
+\rho.
+$$
+
+This specification allows for dependence between the latent trading activity of both outcomes while permitting different persistence and volatility parameters.
+
+*TODO: Insert updated model comparison and parameter estimates.*
+
+An additional extension will examine whether dependence between the zero-volume indicators remains after accounting for the correlated latent processes.
+
+# Summary and Next Steps
+
+The analyses conducted so far indicate that latent dynamics play an important role in modeling trading volume on Polymarket.
+
+The final univariate model combines a latent AR(1) process, time-of-day and weekend covariates, and state-dependent zero probabilities.
+
+The model comparison suggests that allowing the zero probability to depend on the latent state provides a substantial improvement in fit. Grid sensitivity results also indicate numerical stability across the considered discretizations.
+
+The next steps are to:
+
+- Complete the interpretation of the estimated latent state and political events.
+- Evaluate residual diagnostics for the final model.
+- Complete the bivariate Yes/No model comparison.
+- Investigate additional explanatory variables, including election-related events and oil price changes.
+- Assess potential applications to unusual trading activity and market behavior.
+

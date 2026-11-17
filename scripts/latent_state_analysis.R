@@ -1,4 +1,72 @@
+library(dplyr)
 library(ggplot2)
+library(LaMa)
+
+source("functions/ssm_functions.R")
+
+# Load final model
+final <- readRDS("results/final_model/results.rds")
+
+mod <- final$model
+model_data <- final$data
+grid <- final$grid
+
+y <- model_data$volume_usd
+x <- as.matrix(model_data[c("sin_hour", "cos_hour", "weekend")])
+z <- x
+
+# Model parameters
+par <- mod$estimate
+
+mu <- par[2]
+sigma <- exp(par[3])
+phi <- tanh(par[4])
+sigma_s <- exp(par[5])
+
+beta <- par[6:8]
+alpha <- par[9:11]
+gamma_zero <- par[12]
+
+eta <- as.vector(mu + x %*% beta)
+logit_pi <- as.vector(par[1] + z %*% alpha)
+
+# Transition and observation probabilities
+Gamma <- ar1_transition(phi, sigma_s, grid)
+delta <- LaMa::stationary(Gamma)
+
+allprobs <- matrix(0, length(y), length(grid))
+positive <- y > 0
+
+for (j in seq_along(grid)) {
+  pi_zero <- plogis(logit_pi + gamma_zero * grid[j])
+  
+  allprobs[!positive, j] <- pi_zero[!positive]
+  
+  allprobs[positive, j] <- (1 - pi_zero[positive]) *
+    dlnorm(
+      y[positive],
+      meanlog = eta[positive] + grid[j],
+      sdlog = sigma
+    )
+}
+
+# Smoothed latent state
+state_probs <- LaMa::stateprobs(
+  delta = delta,
+  Gamma = Gamma,
+  allprobs = allprobs
+)
+
+latent_state <- as.vector(state_probs %*% grid)
+
+plot_data <- data.frame(
+  hour = model_data$hour,
+  latent_state = latent_state
+)
+
+# Check
+head(plot_data)
+summary(plot_data$latent_state)
 
 # Political events
 events <- data.frame(
@@ -16,7 +84,6 @@ events <- data.frame(
     "Impeachment vote",
     "Midterms"
   ),
-  
   label_y = c(2.95, 2.35, -1.65, -1.65, 2.75),
   vjust = c(-0.5, -0.5, 1.2, 1.2, -0.5)
 )
@@ -63,9 +130,12 @@ p_events <- ggplot(plot_data, aes(hour, latent_state)) +
 
 print(p_events)
 
-# Save plot
-dir.create("results/latent_state",
-           recursive = TRUE, showWarnings = FALSE)
+# Save results
+dir.create(
+  "results/latent_state",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
 
 ggsave(
   "results/latent_state/latent_events_full.png",
@@ -73,4 +143,12 @@ ggsave(
   width = 13,
   height = 5.5,
   dpi = 300
+)
+
+saveRDS(
+  list(
+    plot_data = plot_data,
+    events = events
+  ),
+  "results/latent_state/results.rds"
 )

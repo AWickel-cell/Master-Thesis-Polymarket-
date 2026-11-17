@@ -93,3 +93,60 @@ nll_ssm_cov <- function(par, y, x, grid) {
 nll_ssm_zero_cov <- function(par, y, x, z, grid) {
   nll_ssm_general(par, y, grid, x = x, z = z)
 }
+
+
+
+# Model with state-dependent zero probability
+nll_ssm_state_zero <- function(par, y, x, z, grid) {
+  if (!all(is.finite(par))) return(1e12)
+  
+  mu <- par[2]
+  sigma <- exp(par[3])
+  phi <- tanh(par[4])
+  sigma_s <- exp(par[5])
+  
+  if (sigma < 0.01 || sigma_s < 0.01 ||
+      sigma_s > 5 || abs(phi) > 0.999) return(1e12)
+  
+  n_beta <- ncol(x)
+  n_alpha <- ncol(z)
+  
+  beta <- par[6:(5 + n_beta)]
+  alpha <- par[(6 + n_beta):(5 + n_beta + n_alpha)]
+  gamma_zero <- par[6 + n_beta + n_alpha]
+  
+  eta <- as.vector(mu + x %*% beta)
+  logit_pi <- as.vector(par[1] + z %*% alpha)
+  
+  nll <- tryCatch({
+    gamma <- ar1_transition(phi, sigma_s, grid)
+    delta <- LaMa::stationary(gamma)
+    
+    allprobs <- matrix(0, length(y), length(grid))
+    positive <- y > 0
+    
+    for (j in seq_along(grid)) {
+      pi_zero <- plogis(logit_pi + gamma_zero * grid[j])
+      
+      allprobs[!positive, j] <- pi_zero[!positive]
+      
+      allprobs[positive, j] <-
+        (1 - pi_zero[positive]) *
+        dlnorm(
+          y[positive],
+          meanlog = eta[positive] + grid[j],
+          sdlog = sigma
+        )
+    }
+    
+    -LaMa::forward(
+      delta = delta,
+      Gamma = gamma,
+      allprobs = allprobs
+    )
+  }, error = function(e) 1e12)
+  
+  if (!is.finite(nll)) return(1e12)
+  nll
+}
+

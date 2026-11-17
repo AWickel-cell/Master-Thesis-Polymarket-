@@ -3,8 +3,13 @@ library(tidyr)
 library(lubridate)
 library(readr)
 library(ggplot2)
+library(LaMa)
 
 source("functions/ssm_functions.R")
+
+# Load final model
+final <- readRDS("results/final_model/results.rds")
+grid <- final$grid
 
 # Load Brent oil prices
 oil <- read_csv(
@@ -32,15 +37,9 @@ oil_daily <- oil |>
     oil_change
   )
 
-# Load hourly trading volume
-model_data <- read_csv(
-  "data/volume_hourly.csv",
-  show_col_types = FALSE
-) |>
-  mutate(
-    hour = as_datetime(hour, tz = "UTC"),
-    date = as.Date(hour, tz = "UTC")
-  ) |>
+# Prepare hourly trading volume
+model_data <- final$data |>
+  mutate(date = as.Date(hour, tz = "UTC")) |>
   left_join(oil_daily, by = "date") |>
   arrange(hour) |>
   fill(oil_change, .direction = "down") |>
@@ -75,59 +74,115 @@ cat(
   "\n"
 )
 
-# Fit models
+# Model data
 y <- model_data$volume_usd
-x <- as.matrix(model_data["oil_change"])
-grid <- seq(-5, 5, length.out = 151)
 
-positive_log_y <- log(y[y > 0])
-
-start_ssm <- c(
-  qlogis(mean(y == 0)),
-  mean(positive_log_y),
-  log(sd(positive_log_y)),
-  atanh(0.7),
-  log(0.3)
+x_base <- as.matrix(
+  model_data[c("sin_hour", "cos_hour", "weekend")]
 )
+z <- x_base
+
+x_oil <- cbind(
+  x_base,
+  oil_change = model_data$oil_change
+)
+
+# Fit reference model
+cat("\nFitting final SSM on oil sample...\n")
 
 mod_ssm <- nlm(
-  nll_ssm, start_ssm,
-  y = y, grid = grid
+  nll_ssm_state_zero,
+  p = final$model$estimate,
+  y = y,
+  x = x_base,
+  z = z,
+  grid = grid,
+  iterlim = 500
 )
+
+# Fit model with oil covariate
+start_oil <- c(
+  mod_ssm$estimate[1:8],
+  0,
+  mod_ssm$estimate[9:12]
+)
+
+cat("\nFitting SSM with oil covariate...\n")
 
 mod_oil <- nlm(
-  nll_ssm_cov,
-  c(mod_ssm$estimate, 0),
-  y = y, x = x, grid = grid
+  nll_ssm_state_zero,
+  p = start_oil,
+  y = y,
+  x = x_oil,
+  z = z,
+  grid = grid,
+  hessian = TRUE,
+  iterlim = 500
 )
 
+# Model comparison
 models <- list(
-  "Gaussian SSM" = mod_ssm,
-  "SSM + Oil price change" = mod_oil
+  "Final SSM" = mod_ssm,
+  "Final SSM + Oil price change" = mod_oil
 )
 
 comparison <- data.frame(
   model = names(models),
   loglik = -sapply(models, function(m) m$minimum),
+  parameters = sapply(models, function(m) length(m$estimate)),
   aic = sapply(models, function(m)
     2 * m$minimum + 2 * length(m$estimate)),
   bic = sapply(models, function(m)
     2 * m$minimum + log(length(y)) * length(m$estimate)),
   convergence = sapply(models, function(m) m$code),
   row.names = NULL
+) |>
+  mutate(
+    delta_aic = aic - min(aic),
+    delta_bic = bic - min(bic)
+  )
+
+# Oil coefficient and confidence interval
+oil_beta <- mod_oil$estimate[9]
+
+oil_se <- tryCatch({
+  H <- mod_oil$hessian
+  if (is.null(H) ||
+      any(!is.finite(H)) ||
+      min(eigen(H, symmetric = TRUE,
+                only.values = TRUE)$values) <= 0) {
+    NA_real_
+  } else {
+    sqrt(solve(H)[9, 9])
+  }
+}, error = function(e) NA_real_)
+
+oil_effect <- data.frame(
+  estimate = oil_beta,
+  se = oil_se,
+  lower = oil_beta - qnorm(0.975) * oil_se,
+  upper = oil_beta + qnorm(0.975) * oil_se
 )
 
-cat("Oil coefficient:", round(mod_oil$estimate[6], 4), "\n")
+cat("\nModel comparison:\n")
 print(comparison)
 
+cat("\nOil coefficient and 95% confidence interval:\n")
+print(oil_effect)
+
 # Save results
-dir.create("results/oil_price", recursive = TRUE, showWarnings = FALSE)
+dir.create(
+  "results/oil_price",
+  recursive = TRUE,
+  showWarnings = FALSE
+)
 
 saveRDS(
   list(
     data = model_data,
     models = models,
-    comparison = comparison
+    comparison = comparison,
+    oil_effect = oil_effect
   ),
   "results/oil_price/results.rds"
 )
