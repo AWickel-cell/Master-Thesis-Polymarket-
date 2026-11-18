@@ -34,12 +34,21 @@ events <- read_csv(
   "data/senate_events.csv",
   show_col_types = FALSE
 ) |>
-  mutate(time_utc = as_datetime(time_utc, tz = "UTC")) |>
+  mutate(time_utc = as_datetime(time_utc, tz = "UTC"))
+
+stopifnot(
+  !anyNA(trades$datetime),
+  !anyNA(trades$volume_usd),
+  all(trades$volume_usd >= 0),
+  !anyNA(events$time_utc)
+)
+
+events <- events |>
   filter(time_utc >= start_time, time_utc < end_time)
 
 # Aggregate volume and CNN calls
-prepare_data <- function(minutes) {
-  unit <- paste(minutes, "minutes")
+prepare_data <- function(minutes_value) {
+  unit <- paste(minutes_value, "minutes")
   
   volume <- trades |>
     mutate(period = floor_date(datetime, unit)) |>
@@ -52,8 +61,8 @@ prepare_data <- function(minutes) {
     complete(
       period = seq(
         start_time,
-        end_time - minutes(minutes),
-        by = paste(minutes, "min")
+        end_time - lubridate::minutes(minutes_value),
+        by = paste(minutes_value, "min")
       ),
       fill = list(volume_usd = 0, n_trades = 0)
     ) |>
@@ -68,6 +77,7 @@ prepare_data <- function(minutes) {
     mutate(
       n_calls = replace_na(n_calls, 0L),
       call_dummy = as.integer(n_calls > 0),
+      call_lag1 = lag(call_dummy, default = 0L),
       hour_decimal = hour(period) + minute(period) / 60,
       sin_hour = sin(2 * pi * hour_decimal / 24),
       cos_hour = cos(2 * pi * hour_decimal / 24),
@@ -86,10 +96,16 @@ nll_midterms <- function(par, y, x, z, grid) {
   
   if (!all(is.finite(c(sigma, sigma_s))) ||
       sigma < 0.01 || sigma_s < 0.01 ||
-      sigma_s > 5 || abs(phi) > 0.999) return(1e12)
+      sigma_s > 5 || abs(phi) > 0.999) {
+    return(1e12)
+  }
   
   n_beta <- ncol(x)
   n_alpha <- ncol(z)
+  
+  if (length(par) != 6 + n_beta + n_alpha) {
+    return(1e12)
+  }
   
   beta <- par[6:(5 + n_beta)]
   alpha <- par[(6 + n_beta):(5 + n_beta + n_alpha)]
@@ -138,8 +154,11 @@ get_ci <- function(model) {
   se <- tryCatch({
     if (is.null(hessian) ||
         any(!is.finite(hessian)) ||
-        min(eigen(hessian, symmetric = TRUE,
-                  only.values = TRUE)$values) <= 0) {
+        min(eigen(
+          hessian,
+          symmetric = TRUE,
+          only.values = TRUE
+        )$values) <= 0) {
       NA_real_
     } else {
       sqrt(solve(hessian)[9, 9])
@@ -165,6 +184,16 @@ fit_midterms <- function(model_data, resolution) {
   
   x_count <- cbind(x_base, n_calls = model_data$n_calls)
   x_dummy <- cbind(x_base, call_dummy = model_data$call_dummy)
+  x_lag <- cbind(x_base, call_lag1 = model_data$call_lag1)
+  
+  stopifnot(
+    !anyNA(y),
+    !anyNA(x_base),
+    !anyNA(z),
+    !anyNA(x_count),
+    !anyNA(x_dummy),
+    !anyNA(x_lag)
+  )
   
   start_base <- final$model$estimate
   
@@ -213,10 +242,24 @@ fit_midterms <- function(model_data, resolution) {
     iterlim = 500
   )
   
+  cat("\nFitting CNN lag 1:", resolution, "\n")
+  
+  mod_lag <- nlm(
+    nll_midterms,
+    p = start_event,
+    y = y,
+    x = x_lag,
+    z = z,
+    grid = grid,
+    hessian = TRUE,
+    iterlim = 500
+  )
+  
   models <- list(
     "SSM" = mod_base,
     "SSM + CNN count" = mod_count,
-    "SSM + CNN dummy" = mod_dummy
+    "SSM + CNN dummy" = mod_dummy,
+    "SSM + CNN lag 1" = mod_lag
   )
   
   comparison <- data.frame(
@@ -238,7 +281,8 @@ fit_midterms <- function(model_data, resolution) {
   
   confidence_intervals <- bind_rows(
     mutate(get_ci(mod_count), model = "CNN count"),
-    mutate(get_ci(mod_dummy), model = "CNN dummy")
+    mutate(get_ci(mod_dummy), model = "CNN dummy"),
+    mutate(get_ci(mod_lag), model = "CNN lag 1")
   ) |>
     mutate(resolution = resolution) |>
     select(resolution, model, estimate, se, lower, upper)
@@ -254,6 +298,13 @@ fit_midterms <- function(model_data, resolution) {
   
   cat("\nCNN coefficients and 95% confidence intervals:\n")
   print(confidence_intervals)
+  
+  if (any(comparison$convergence != 1)) {
+    warning(
+      "Some models did not reach nlm convergence code 1: ",
+      resolution
+    )
+  }
   
   list(
     data = model_data,
@@ -318,3 +369,4 @@ saveRDS(
   results,
   "results/midterms/results.rds"
 )
+

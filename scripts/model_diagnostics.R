@@ -4,25 +4,23 @@ library(lubridate)
 
 source("functions/ssm_functions.R")
 
-# Load state-dependent zero model
-fit <- readRDS("results/state_dependent_zero/results.rds")
+# Load final model
+fit <- readRDS("results/final_model/results.rds")
 
 model_data <- fit$data
 grid <- fit$grid
-par_hat <- fit$models[["State-dependent zeros"]]$estimate
+par_hat <- fit$model$estimate
 
 y <- model_data$volume_usd
 
 x <- as.matrix(
-  model_data[c("price", "sin_hour", "cos_hour", "weekend")]
-)
-
-z <- as.matrix(
   model_data[c("sin_hour", "cos_hour", "weekend")]
 )
 
+z <- x
+
 stopifnot(
-  length(par_hat) == 13,
+  length(par_hat) == 12,
   !anyNA(y), !anyNA(x), !anyNA(z),
   all(y >= 0)
 )
@@ -32,10 +30,10 @@ mu <- par_hat[2]
 sigma <- exp(par_hat[3])
 phi <- tanh(par_hat[4])
 sigma_s <- exp(par_hat[5])
-gamma_zero <- par_hat[13]
+gamma_zero <- par_hat[12]
 
-eta <- as.vector(mu + x %*% par_hat[6:9])
-logit_pi <- as.vector(par_hat[1] + z %*% par_hat[10:12])
+eta <- as.vector(mu + x %*% par_hat[6:8])
+logit_pi <- as.vector(par_hat[1] + z %*% par_hat[9:11])
 
 gamma <- ar1_transition(phi, sigma_s, grid)
 predicted <- as.vector(LaMa::stationary(gamma))
@@ -58,10 +56,10 @@ for (t in seq_along(y)) {
     upper <- pred_zero[t]
     likelihood <- pi_state
   } else {
-    cdf <- pnorm(
-      log(y[t]),
-      mean = eta[t] + grid,
-      sd = sigma
+    cdf <- plnorm(
+      y[t],
+      meanlog = eta[t] + grid,
+      sdlog = sigma
     )
     
     upper <- pred_zero[t] +
@@ -93,70 +91,105 @@ for (t in seq_along(y)) {
 }
 
 # Residual summary
+cat("\n--- Residual Diagnostics ---\n")
+cat("Observations:", length(y), "\n")
 cat("Mean:", round(mean(residuals), 4), "\n")
 cat("SD:", round(sd(residuals), 4), "\n")
+cat("Median:", round(median(residuals), 4), "\n")
+cat("Share |residual| > 2:",
+    round(mean(abs(residuals) > 2), 4), "\n")
 cat("Share |residual| > 3:",
     round(mean(abs(residuals) > 3), 4), "\n")
 
-# Diagnostic plots
-par(mfrow = c(2, 2))
+cat("\n--- Zero Volume Calibration ---\n")
+cat("Observed zero share:",
+    round(mean(y == 0), 4), "\n")
+cat("Predicted zero share:",
+    round(mean(pred_zero), 4), "\n")
+cat("Mean zero residual:",
+    round(mean(zero_residuals), 4), "\n")
 
-hist(
-  residuals,
-  breaks = 50,
-  probability = TRUE,
-  main = "Randomized Quantile Residuals",
-  xlab = "Residual"
-)
-curve(dnorm(x), add = TRUE, col = "red", lwd = 2)
-
-qqnorm(residuals, main = "Normal Q-Q Plot")
-qqline(residuals, col = "red", lwd = 2)
-
-acf(
+acf_values <- acf(
   residuals,
   lag.max = 72,
-  main = "ACF of Quantile Residuals"
+  plot = FALSE
+)$acf
+
+cat("\n--- Residual Autocorrelation ---\n")
+cat("ACF lag 1:", round(acf_values[2], 4), "\n")
+cat("ACF lag 24:", round(acf_values[25], 4), "\n")
+cat("ACF lag 72:", round(acf_values[73], 4), "\n")
+
+
+# Output directory
+dir.create(
+  "results/diagnostics",
+  recursive = TRUE,
+  showWarnings = FALSE
 )
 
-plot(
-  model_data$hour,
-  residuals,
-  type = "l",
-  xlab = "Time",
-  ylab = "Quantile Residual",
-  main = "Residuals Over Time"
-)
-abline(h = 0, col = "red")
+# Helper: show and save each plot
+show_and_save <- function(filename, plot_fun,
+                          width = 900, height = 550) {
+  plot_fun()
+  
+  png(
+    file.path("results/diagnostics", filename),
+    width = width,
+    height = height
+  )
+  plot_fun()
+  dev.off()
+}
 
-par(mfrow = c(1, 1))
+# 1. Histogram
+show_and_save("residual_histogram.png", function() {
+  hist(
+    residuals,
+    breaks = 50,
+    probability = TRUE,
+    main = "Randomized Quantile Residuals",
+    xlab = "Residual"
+  )
+  curve(dnorm(x), add = TRUE, col = "red", lwd = 2)
+})
 
-# Zero indicator diagnostics
-acf(
-  zero_residuals,
-  lag.max = 72,
-  main = "ACF of Zero Indicator Residuals"
-)
+# 2. Normal Q-Q plot
+show_and_save("residual_qqplot.png", function() {
+  qqnorm(residuals, main = "Normal Q-Q Plot")
+  qqline(residuals, col = "red", lwd = 2)
+})
 
-cat("\nLjung-Box tests:\n")
+# 3. Residual ACF
+show_and_save("residual_acf.png", function() {
+  acf(
+    residuals,
+    lag.max = 72,
+    main = "ACF of Quantile Residuals"
+  )
+})
 
-print(Box.test(
-  residuals,
-  lag = 24,
-  type = "Ljung-Box"
-))
+# 4. Residuals over time
+show_and_save("residual_timeseries.png", function() {
+  plot(
+    model_data$hour,
+    residuals,
+    type = "l",
+    xlab = "Time",
+    ylab = "Quantile Residual",
+    main = "Residuals Over Time"
+  )
+  abline(h = 0, col = "red")
+}, width = 1100)
 
-print(Box.test(
-  residuals,
-  lag = 72,
-  type = "Ljung-Box"
-))
-
-print(Box.test(
-  zero_residuals,
-  lag = 24,
-  type = "Ljung-Box"
-))
+# 5. Zero indicator ACF
+show_and_save("zero_acf.png", function() {
+  acf(
+    zero_residuals,
+    lag.max = 72,
+    main = "ACF of Zero Indicator Residuals"
+  )
+})
 
 # Zero probability calibration
 calibration <- model_data |>
@@ -171,11 +204,24 @@ calibration <- model_data |>
     .groups = "drop"
   )
 
-par(mfrow = c(1, 2))
+calibration_summary <- model_data |>
+  mutate(pi_zero = pred_zero) |>
+  group_by(weekend) |>
+  summarise(
+    observed = mean(volume_usd == 0),
+    estimated = mean(pi_zero),
+    .groups = "drop"
+  )
 
-for (w in 0:1) {
-  dat <- calibration |>
-    filter(weekend == w)
+cat("\n--- Zero Calibration by Weekend ---\n")
+print(calibration_summary)
+
+cat("\n--- Zero Calibration by Hour ---\n")
+print(calibration, n = Inf)
+
+# 6. Zero calibration: weekdays
+show_and_save("zero_calibration_weekdays.png", function() {
+  dat <- calibration |> filter(weekend == 0)
   
   plot(
     dat$hour_utc,
@@ -185,7 +231,7 @@ for (w in 0:1) {
     ylim = range(c(dat$observed, dat$estimated)),
     xlab = "Hour (UTC)",
     ylab = "Probability of Zero Volume",
-    main = if (w == 0) "Weekdays" else "Weekend"
+    main = "Zero Calibration - Weekdays"
   )
   
   points(dat$hour_utc, dat$observed, pch = 16)
@@ -197,17 +243,36 @@ for (w in 0:1) {
     pch = c(NA, 16),
     bty = "n"
   )
-}
+})
 
-par(mfrow = c(1, 1))
+# 7. Zero calibration: weekend
+show_and_save("zero_calibration_weekend.png", function() {
+  dat <- calibration |> filter(weekend == 1)
+  
+  plot(
+    dat$hour_utc,
+    dat$estimated,
+    type = "l",
+    lwd = 2,
+    ylim = range(c(dat$observed, dat$estimated)),
+    xlab = "Hour (UTC)",
+    ylab = "Probability of Zero Volume",
+    main = "Zero Calibration - Weekend"
+  )
+  
+  points(dat$hour_utc, dat$observed, pch = 16)
+  
+  legend(
+    "topright",
+    legend = c("Estimated", "Observed"),
+    lty = c(1, NA),
+    pch = c(NA, 16),
+    bty = "n"
+  )
+})
+
 
 # Save results
-dir.create(
-  "results/state_dependent_zero",
-  recursive = TRUE,
-  showWarnings = FALSE
-)
-
 saveRDS(
   data.frame(
     hour = model_data$hour,
@@ -216,5 +281,5 @@ saveRDS(
     zero_residual = zero_residuals,
     pi_zero = pred_zero
   ),
-  "results/state_dependent_zero/residuals.rds"
+  "results/diagnostics/residuals.rds"
 )

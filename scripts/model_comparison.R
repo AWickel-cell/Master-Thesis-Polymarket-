@@ -4,9 +4,8 @@ library(LaMa)
 
 source("functions/ssm_functions.R")
 
-# Load existing results
+# Load final model and data
 final <- readRDS("results/final_model/results.rds")
-previous <- readRDS("results/model_comparison/results.rds")
 
 model_data <- final$data
 grid <- final$grid
@@ -15,16 +14,46 @@ y <- model_data$volume_usd
 x <- as.matrix(model_data[c("sin_hour", "cos_hour", "weekend")])
 z <- x
 
-mod_baseline <- previous$models[["Baseline"]]
-mod_regression <- previous$models[["Regression without latent process"]]
 mod_final <- final$model
 
 stopifnot(
   length(y) == nrow(x),
+  length(y) == nrow(z),
   !anyNA(y), !anyNA(x),
   all(y >= 0),
   length(mod_final$estimate) == 12
 )
+
+# Baseline: zero-adjusted log-Gaussian
+nll_baseline <- function(par, y) {
+  pi_zero <- plogis(par[1])
+  mu <- par[2]
+  sigma <- exp(par[3])
+  
+  zero <- y == 0
+  positive <- !zero
+  
+  -(sum(zero) * log(pi_zero) +
+      sum(log1p(-pi_zero) +
+            dlnorm(y[positive], mu, sigma, log = TRUE)))
+}
+
+# Regression without latent process
+nll_regression <- function(par, y, x, z) {
+  mu <- par[2]
+  sigma <- exp(par[3])
+  
+  eta <- as.vector(mu + x %*% par[4:6])
+  pi_zero <- plogis(as.vector(par[1] + z %*% par[7:9]))
+  
+  zero <- y == 0
+  positive <- !zero
+  
+  -(sum(log(pi_zero[zero])) +
+      sum(log1p(-pi_zero[positive]) +
+            dlnorm(y[positive], eta[positive],
+                   sigma, log = TRUE)))
+}
 
 # Baseline SSM: latent AR(1), constant zero probability
 nll_baseline_ssm <- function(par, y, grid) {
@@ -109,19 +138,44 @@ nll_cov_ssm <- function(par, y, x, z, grid) {
   nll
 }
 
-# Fit missing models
-cat("\nFitting baseline SSM...\n")
+# Starting values
+log_y <- log(y[y > 0])
+p0 <- pmin(pmax(mean(y == 0), 1e-4), 1 - 1e-4)
 
-start_baseline_ssm <- c(
-  mod_baseline$estimate,
-  mod_final$estimate[4:5]
+start_baseline <- c(
+  qlogis(p0),
+  mean(log_y),
+  log(sd(log_y))
 )
+
+# Fit models
+cat("\nFitting baseline...\n")
+
+mod_baseline <- nlm(
+  nll_baseline,
+  p = start_baseline,
+  y = y,
+  iterlim = 500
+)
+
+cat("\nFitting baseline SSM...\n")
 
 mod_baseline_ssm <- nlm(
   nll_baseline_ssm,
-  p = start_baseline_ssm,
+  p = c(mod_baseline$estimate, mod_final$estimate[4:5]),
   y = y,
   grid = grid,
+  iterlim = 500
+)
+
+cat("\nFitting regression...\n")
+
+mod_regression <- nlm(
+  nll_regression,
+  p = c(mod_baseline$estimate, rep(0, 6)),
+  y = y,
+  x = x,
+  z = z,
   iterlim = 500
 )
 
@@ -150,12 +204,10 @@ comparison <- data.frame(
   model = names(models),
   loglik = -sapply(models, function(m) m$minimum),
   parameters = sapply(models, function(m) length(m$estimate)),
-  aic = sapply(models, function(m) {
-    2 * m$minimum + 2 * length(m$estimate)
-  }),
-  bic = sapply(models, function(m) {
-    2 * m$minimum + log(length(y)) * length(m$estimate)
-  }),
+  aic = sapply(models, function(m)
+    2 * m$minimum + 2 * length(m$estimate)),
+  bic = sapply(models, function(m)
+    2 * m$minimum + log(length(y)) * length(m$estimate)),
   convergence = sapply(models, function(m) m$code),
   row.names = NULL
 ) |>
@@ -209,9 +261,12 @@ write_csv(
 saveRDS(
   list(
     models = models,
+    data = model_data,
+    grid = grid,
     comparison = comparison,
     latent_parameters = latent_parameters
   ),
   "results/model_comparison/results.rds"
+)
 )
 
